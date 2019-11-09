@@ -1,0 +1,101 @@
+
+AWSTemplateFormatVersion: 2010-09-09
+Description: Minecraft server on Amazon Linux 2 with SSH access
+Parameters:
+  InstanceType:
+    Description: The type of EC2 instance for the server
+    Type: String
+    Default: t2.micro
+    AllowedValues:
+      - t2.micro
+      - t2.small
+      - t2.medium
+  KeyName:
+    Description: The name of an EC2 KeyPair to allow server SSH access
+    Type: AWS::EC2::KeyPair::KeyName
+    ConstraintDescription: The name of an existing KeyPair
+  MyIP:
+    Description: The IP address to allow SSH access from
+    Type: String
+  ServerBucket:
+    Description: An S3 bucket containing the minecraft server jar and world folder
+    Type: String
+Outputs:
+  ServerIP:
+    Description: The public IP address of the server
+    Value:
+      Fn::GetAtt: [ Server, PublicIp ]
+Resources:
+  Server:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: ami-00e8b55a2e841be44
+      InstanceType:
+        Ref: InstanceType
+      KeyName:
+        Ref: KeyName
+      IamInstanceProfile:
+        Ref: S3AccessInstanceProfile
+      SecurityGroups:
+        - Ref: ServerAccessSecurityGroup
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          sudo yum install java-1.8.0-openjdk.x86_64 -y
+          cd /srv
+          aws s3 cp s3://${ServerBucket}/server.jar .
+          aws s3 cp s3://${ServerBucket}/world .
+          echo eula=true > eula.txt
+          echo "*/2 * * * * aws s3 cp /srv/world s3://${ServerBucket}/world --recursive" > backupcron
+          crontab backupcron
+          screen -S server -dm java -Xmx1024M -Xms1024M -jar server.jar nogui
+  ServerAccessSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+     GroupDescription: Server access security group
+     SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: 22
+        ToPort: 22
+        CidrIp:
+          Fn::Join: [ "/", [ Ref: MyIP, 32 ] ]
+      - IpProtocol: tcp
+        FromPort: 25565
+        ToPort: 25565
+        CidrIp: 0.0.0.0/0
+  S3AccessRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Action:
+              - sts:AssumeRole
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+      Path: "/"
+  S3AccessPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: S3AccessPolicy
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - s3:DeleteObject
+              - s3:GetObject
+              - s3:PutObject
+              - s3:ListObjectsV2
+            Resource:
+              Fn::Join: [ '', [ 'arn:aws:s3:::', Ref: ServerBucket , "/*"]]
+      Roles:
+        - Ref: S3AccessRole
+  S3AccessInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: "/"
+      Roles:
+        - Ref: S3AccessRole
+        
