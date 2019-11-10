@@ -1,4 +1,3 @@
-
 AWSTemplateFormatVersion: 2010-09-09
 Description: Minecraft server on Amazon Linux 2 with SSH access
 Parameters:
@@ -20,6 +19,11 @@ Parameters:
   ServerBucket:
     Description: An S3 bucket containing the minecraft server jar and world folder
     Type: String
+  BackupPeriod:
+    Description: The number of minutes between S3 backups
+    Type: Number
+    MinValue: 2
+    MaxValue: 10
 Outputs:
   ServerIP:
     Description: The public IP address of the server
@@ -44,9 +48,9 @@ Resources:
           sudo yum install java-1.8.0-openjdk.x86_64 -y
           cd /srv
           aws s3 cp s3://${ServerBucket}/server.jar .
-          aws s3 cp s3://${ServerBucket}/world .
+          aws s3 cp s3://${ServerBucket}/world world --recursive
           echo eula=true > eula.txt
-          echo "*/2 * * * * aws s3 cp /srv/world s3://${ServerBucket}/world --recursive" > backupcron
+          echo "*/${BackupPeriod} * * * * aws s3 cp /srv/world s3://${ServerBucket}/world --recursive" > backupcron
           crontab backupcron
           screen -S server -dm java -Xmx1024M -Xms1024M -jar server.jar nogui
   ServerAccessSecurityGroup:
@@ -84,12 +88,13 @@ Resources:
         Statement:
           - Effect: Allow
             Action:
-              - s3:DeleteObject
               - s3:GetObject
               - s3:PutObject
-              - s3:ListObjectsV2
+              - s3:DeleteObject
+              - s3:ListBucket
             Resource:
-              Fn::Join: [ '', [ 'arn:aws:s3:::', Ref: ServerBucket , "/*"]]
+              - Fn::Join: [ '', [ 'arn:aws:s3:::', Ref: ServerBucket ]]
+              - Fn::Join: [ '', [ 'arn:aws:s3:::', Ref: ServerBucket , "/*"]]
       Roles:
         - Ref: S3AccessRole
   S3AccessInstanceProfile:
