@@ -22,8 +22,9 @@ Parameters:
   BackupPeriod:
     Description: The number of minutes between S3 backups
     Type: Number
-    MinValue: 2
-    MaxValue: 10
+    ConstraintDescription: A number between 5 and 60
+    MinValue: 5
+    MaxValue: 60
 Outputs:
   ServerIP:
     Description: The public IP address of the server
@@ -36,6 +37,8 @@ Resources:
       ImageId: ami-00e8b55a2e841be44
       InstanceType:
         Ref: InstanceType
+      CreditSpecification:
+        CPUCredits: unlimited
       KeyName:
         Ref: KeyName
       IamInstanceProfile:
@@ -48,11 +51,16 @@ Resources:
           sudo yum install java-1.8.0-openjdk.x86_64 -y
           cd /srv
           aws s3 cp s3://${ServerBucket}/server.jar .
-          aws s3 cp s3://${ServerBucket}/world world --recursive
+          aws s3 cp s3://${ServerBucket}/world.zip .
+          unzip world.zip
           echo eula=true > eula.txt
-          echo "*/${BackupPeriod} * * * * aws s3 cp /srv/world s3://${ServerBucket}/world --recursive" > backupcron
+          echo $'screen -S server -dm java -Xmx1024M -Xms1024M -jar server.jar nogui' > start.sh
+          echo $'cd /srv/; zip -r -j world.zip ./world; aws s3 cp world.zip s3://${ServerBucket}' > backup.sh
+          chmod u+x start.sh
+          chmod u+x backup.sh
+          echo $'@reboot /srv/start.sh\n*/${BackupPeriod} * * * * /srv/backup.sh' > backupcron
           crontab backupcron
-          screen -S server -dm java -Xmx1024M -Xms1024M -jar server.jar nogui
+          ./start.sh
   ServerAccessSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
